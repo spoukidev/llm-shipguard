@@ -1,0 +1,93 @@
+# ShipGuard policy (trusted operator configuration).
+# Environment variables like ${VAR} are expanded at load time.
+version: 1
+
+upstreams:
+  mock:            {type: mock}                                     # in-process gullible mock
+  mock-http:       {type: openai, base_url: "${MOCK_UPSTREAM_URL:-http://mock-upstream:9000/v1}"}
+  openai:          {type: openai, base_url: "https://api.openai.com/v1", api_key_env: OPENAI_API_KEY}
+  openrouter:      {type: openai, base_url: "https://openrouter.ai/api/v1", api_key_env: OPENROUTER_API_KEY}
+  vllm:            {type: openai, base_url: "http://localhost:8000/v1", api_key_env: VLLM_API_KEY}
+  ollama:          {type: openai, base_url: "http://localhost:11434/v1"}
+  anthropic:       {type: anthropic, base_url: "https://api.anthropic.com", api_key_env: ANTHROPIC_API_KEY}
+
+routing:
+  default_upstream: mock          # override with SHIPGUARD_UPSTREAM=mock-http in Docker
+  model_prefixes:
+    "openai/": openai
+    "openrouter/": openrouter
+    "vllm/": vllm
+    "ollama/": ollama
+    "anthropic/": anthropic
+    "mock/": mock
+
+input:
+  max_prompt_chars: 32000
+  max_messages: 64
+  max_tokens_cap: 2048
+  unicode:   {enabled: true, strip_invisible: true, fold_homoglyphs: true}
+  secrets:   {action: redact, restore_in_output: false}   # never hand secrets back
+  pii:
+    action: redact
+    restore_in_output: true                                # the user typed it; give it back
+    engine: regex                                          # or "presidio" if installed
+    entities: [EMAIL, PHONE, CREDIT_CARD, US_SSN, IBAN]
+  injection:
+    enabled: true
+    user:      {warn_at: 0.40, block_at: 0.70}
+    documents: {quarantine_at: 0.45, action: quarantine}  # quarantine | block | warn
+    decode_payloads: true
+    classifier_enabled: false
+  spotlight:
+    mode: delimit                                          # delimit | datamark | off
+    document_tags: [document, retrieved, context]
+    treat_tool_messages_as_documents: true
+
+canary:
+  enabled: true
+  action: block                                            # block | warn
+  prefix: SG-CANARY
+
+output:
+  system_prompt_overlap_words: 10
+  blocked_markers: [INJECTION_SUCCESS]
+  disallowed_topics:                                       # fictional categories only
+    - name: glimmer-device
+      patterns: ['glimmer[\s-]*device', '\[RESTRICTED-CONTENT\]']
+    - name: zorblax-synthesis
+      patterns: ['zorblax']
+    - name: quantum-lockpick
+      patterns: ['quantum[\s-]*lock[\s-]*pick']
+  link_allowed_hosts: [shipguard.example, docs.shipguard.example]
+  link_action: strip                                       # strip | block | warn
+  scan_secrets: true
+  scan_pii: true
+
+tools:
+  enabled: true
+  allowed: [search_docs, get_weather, http_get, send_email]
+  allowed_hosts: [api.shipguard.example, docs.shipguard.example]
+  max_tool_calls: 4
+  rules:
+    send_email:
+      allowed_recipient_domains: [shipguard.example]
+      max_calls: 1
+    http_get:
+      allowed_hosts: [docs.shipguard.example]
+
+rate_limits:
+  enabled: true
+  default: {requests_per_minute: 120, burst: 30}
+  routes:
+    /v1/chat/completions: {requests_per_minute: 60, burst: 20}
+
+audit:
+  enabled: true
+  db_url: "sqlite:///./data/audit.db"
+  store_redacted_preview: true
+  preview_chars: 160
+
+server:
+  on_block: completion          # completion (finish_reason=content_filter) | error (HTTP 403)
+  expose_decision_in_body: true
+  block_message: "This request was blocked by ShipGuard security policy."

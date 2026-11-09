@@ -1,0 +1,71 @@
+# ShipGuard local stack: mock upstream LLM + gateway + vulnerable/guarded demo app + dashboard.
+# No paid API is needed: the gateway routes to the gullible mock upstream.
+name: shipguard
+
+x-image: &image
+  image: llm-shipguard:latest
+  build: .
+
+services:
+  mock-upstream:
+    <<: *image
+    command: ["uvicorn", "mock_upstream.app:app", "--host", "0.0.0.0", "--port", "9000"]
+    ports: ["9000:9000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/healthz')"]
+      interval: 5s
+      retries: 10
+
+  gateway:
+    <<: *image
+    environment:
+      SHIPGUARD_UPSTREAM: mock-http
+      MOCK_UPSTREAM_URL: http://mock-upstream:9000/v1
+      SHIPGUARD_AUDIT_DB: sqlite:////app/data/audit.db
+      SHIPGUARD_CANARY_SECRET: ${SHIPGUARD_CANARY_SECRET:-change-me-in-production}
+      # SHIPGUARD_API_KEYS: "client-key-1,client-key-2"   # uncomment to require client keys
+      # OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY: provider keys live ONLY here
+    ports: ["8088:8088"]
+    volumes: ["audit-data:/app/data"]
+    depends_on:
+      mock-upstream: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8088/healthz')"]
+      interval: 5s
+      retries: 10
+
+  vulnerable-app:
+    <<: *image
+    command: ["python", "-m", "demo.vulnerable_app"]
+    environment: {OPENAI_BASE_URL: http://mock-upstream:9000/v1, PORT: "8101"}
+    ports: ["8101:8101"]
+    depends_on:
+      mock-upstream: {condition: service_healthy}
+
+  guarded-app:
+    <<: *image
+    command: ["python", "-m", "demo.guarded_app"]
+    environment: {SHIPGUARD_URL: http://gateway:8088/v1, PORT: "8102"}
+    ports: ["8102:8102"]
+    depends_on:
+      gateway: {condition: service_healthy}
+
+  dashboard:
+    <<: *image
+    command: ["streamlit", "run", "dashboard/app.py", "--server.port", "8502", "--server.address", "0.0.0.0",
+              "--server.headless", "true"]
+    environment: {SHIPGUARD_AUDIT_DB: sqlite:////app/data/audit.db}
+    ports: ["8502:8502"]
+    volumes: ["audit-data:/app/data:ro"]
+    depends_on: [gateway]
+
+  # one-shot: `docker compose run --rm demo`
+  demo:
+    <<: *image
+    profiles: ["demo"]
+    command: ["python", "-m", "demo.run_demo", "--mock-url", "http://mock-upstream:9000", "--gateway-url", "http://gateway:8088"]
+    depends_on:
+      gateway: {condition: service_healthy}
+
+volumes:
+  audit-data:
