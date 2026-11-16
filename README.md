@@ -1,5 +1,7 @@
 # ShipGuard
 
+[![CI](https://github.com/spoukidev/llm-shipguard/actions/workflows/ci.yml/badge.svg)](https://github.com/spoukidev/llm-shipguard/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **An OpenAI-compatible security gateway for LLM apps.** Point your app's `OPENAI_BASE_URL` at ShipGuard and every
 chat-completions call gets secret/PII redaction, prompt-injection and jailbreak heuristics, a system-prompt canary,
 output policy, tool-call allowlists, per-route rate limits, and a privacy-preserving audit trail. No app code changes.
