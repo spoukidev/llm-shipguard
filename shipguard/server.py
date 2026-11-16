@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from shipguard import __version__
 from shipguard.audit import AuditLog
 from shipguard.config import Policy, load_policy
-from shipguard.pipeline import REQUEST_STAGES, Pipeline
+from shipguard.pipeline import REQUEST_STAGES, Pipeline, validate_body
 from shipguard.ratelimit import RateLimiter
 from shipguard.upstream import Upstream, UpstreamError, UpstreamRouter
 
@@ -126,7 +126,13 @@ def create_app(policy: Policy | None = None, *, upstream_overrides: dict[str, Up
     async def scan(request: Request) -> JSONResponse:
         if not _auth_ok(request):
             return _error(401, "invalid ShipGuard client key", "unauthorized")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return _error(400, "body must be JSON", "invalid_json")
+        problem = validate_body(body)
+        if problem:
+            return _error(400, problem, "invalid_request")
         ctx = pipeline.new_context(body, client_id=_client_id(request), route="/v1/shipguard/scan")
         for name in REQUEST_STAGES:
             ctx.add(getattr(pipeline, f"stage_{name}")(ctx))
@@ -150,8 +156,9 @@ def create_app(policy: Policy | None = None, *, upstream_overrides: dict[str, Up
             body = await request.json()
         except json.JSONDecodeError:
             return _error(400, "body must be JSON", "invalid_json")
-        if not isinstance(body, dict):
-            return _error(400, "body must be a JSON object", "invalid_request")
+        problem = validate_body(body)
+        if problem:
+            return _error(400, problem, "invalid_request")
 
         ctx = pipeline.new_context(body, client_id=client, session_id=request.headers.get("x-shipguard-session"))
         try:

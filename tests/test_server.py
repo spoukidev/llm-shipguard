@@ -109,3 +109,24 @@ async def test_upstream_failure_is_502(policy, audit):
 def test_routing(app, model, upstream):
     up, name = app.state.router.resolve(model)
     assert up.name == upstream and "/" not in name
+
+
+@pytest.mark.parametrize("body", [
+    [{"role": "user", "content": "hi"}],
+    {"model": "m", "messages": "hi"},
+    {"model": "m", "messages": ["hi"]},
+    {"model": "m", "messages": [{"role": "user", "content": 123}]},
+    {"model": "m", "messages": [{"role": "user", "content": [{"type": "text", "text": 5}]}]},
+    {"model": "m", "messages": [{"role": "user", "content": "hi"}], "shipguard": "x"},
+    {"model": "m", "messages": [{"role": "user", "content": "hi"}], "shipguard": {"documents": ["doc"]}},
+])
+async def test_malformed_bodies_are_400_not_500(client, body):
+    for route in ("/v1/chat/completions", "/v1/shipguard/scan"):
+        r = await client.post(route, json=body)
+        assert r.status_code == 400, (route, r.text)
+        assert r.json()["error"]["code"] == "invalid_request"
+
+
+async def test_scan_rejects_non_json(client):
+    r = await client.post("/v1/shipguard/scan", content=b"not json")
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_json"

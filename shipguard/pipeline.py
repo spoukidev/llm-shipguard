@@ -117,6 +117,41 @@ def _text_of(content: Any) -> str:
     return content or ""
 
 
+def validate_body(body: Any) -> str | None:
+    """Return an error message if ``body`` is not shaped like a chat-completions request.
+
+    Only structural problems are rejected here (wrong JSON types that would crash the stages);
+    policy questions such as an empty ``messages`` list are left to the pipeline.
+    """
+    if not isinstance(body, dict):
+        return "body must be a JSON object"
+    msgs = body.get("messages")
+    if msgs is not None and not isinstance(msgs, list):
+        return "messages must be a list"
+    for i, m in enumerate(msgs or []):
+        if not isinstance(m, dict):
+            return f"messages[{i}] must be an object"
+        content = m.get("content")
+        if content is not None and not isinstance(content, (str, list)):
+            return f"messages[{i}].content must be a string, a list of parts, or null"
+        if isinstance(content, list):
+            for k, part in enumerate(content):
+                if isinstance(part, dict) and part.get("type", "text") == "text" and not isinstance(part.get("text", ""), str):
+                    return f"messages[{i}].content[{k}].text must be a string"
+    ext = body.get("shipguard")
+    if ext is not None:
+        if not isinstance(ext, dict):
+            return "shipguard must be an object"
+        docs = ext.get("documents")
+        if docs is not None:
+            if not isinstance(docs, list):
+                return "shipguard.documents must be a list"
+            for k, d in enumerate(docs):
+                if not isinstance(d, dict) or not isinstance(d.get("text", ""), str):
+                    return f"shipguard.documents[{k}] must be an object with a string 'text'"
+    return None
+
+
 def _map_text(msg: dict[str, Any], fn: Callable[[str], str]) -> None:
     c = msg.get("content")
     if isinstance(c, str):
