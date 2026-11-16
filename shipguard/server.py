@@ -17,6 +17,7 @@ Endpoints
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import time
@@ -110,7 +111,11 @@ def create_app(policy: Policy | None = None, *, upstream_overrides: dict[str, Up
         if not keys:
             return True
         auth = request.headers.get("authorization", "")
-        return auth.lower().startswith("bearer ") and auth[7:] in keys
+        if not auth.lower().startswith("bearer "):
+            return False
+        presented = auth[7:].encode()
+        # compare against every key in constant time so response timing does not leak key prefixes
+        return any([hmac.compare_digest(presented, k.encode()) for k in keys])
 
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
