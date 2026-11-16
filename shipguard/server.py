@@ -32,6 +32,7 @@ from shipguard.audit import AuditLog
 from shipguard.config import Policy, load_policy
 from shipguard.pipeline import REQUEST_STAGES, Pipeline, validate_body
 from shipguard.ratelimit import RateLimiter
+from shipguard.redact import sha256_short
 from shipguard.upstream import Upstream, UpstreamError, UpstreamRouter
 
 ROUTE = "/v1/chat/completions"
@@ -149,7 +150,7 @@ def create_app(policy: Policy | None = None, *, upstream_overrides: dict[str, Up
         client = _client_id(request)
         ok, retry = limiter.check(ROUTE, client)
         if not ok:
-            audit_log.record(request_id="ratelimited", route=ROUTE, client_hash=client[-16:], decision="block",
+            audit_log.record(request_id="ratelimited", route=ROUTE, client_hash=sha256_short(client), decision="block",
                              reason="rate limit", filters_fired=["ratelimit"], status_code=429)
             return _error(429, "rate limit exceeded", "rate_limited", headers={"Retry-After": f"{max(1, int(retry + 0.999))}"})
         try:

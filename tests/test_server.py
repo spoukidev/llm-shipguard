@@ -130,3 +130,17 @@ async def test_malformed_bodies_are_400_not_500(client, body):
 async def test_scan_rejects_non_json(client):
     r = await client.post("/v1/shipguard/scan", content=b"not json")
     assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_json"
+
+
+async def test_rate_limited_audit_row_hashes_client(policy, audit):
+    policy.rate_limits.enabled = True
+    policy.rate_limits.routes["/v1/chat/completions"].burst = 1
+    policy.rate_limits.routes["/v1/chat/completions"].requests_per_minute = 1
+    app = create_app(policy, audit=audit)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://s") as c:
+        for _ in range(2):
+            await c.post("/v1/chat/completions", json=chat("hi"), headers={"X-ShipGuard-Client": "alice-laptop-01"})
+    rows = [r.model_dump(mode="json") for r in audit.recent(10)]
+    limited = [r for r in rows if r["reason"] == "rate limit"]
+    assert limited and all("alice" not in json.dumps(r) for r in rows)
+    assert len({r["client_hash"] for r in rows}) == 1  # same hash as the normal audit rows
