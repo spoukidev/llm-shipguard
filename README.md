@@ -299,6 +299,9 @@ tests/               pytest suite
   part of the measured runs.
 - **Optional classifier** (`classifier_enabled`) is a hook for a Hugging Face prompt-injection model. It was not run
   for the reported numbers.
+- **Rate-limit identity needs auth.** Buckets are keyed by the bearer key, else `X-ShipGuard-Client`, else client IP.
+  Without `SHIPGUARD_API_KEYS`, callers choose their own bearer/header value, so they can rotate it to get fresh
+  buckets. Set API keys (or strip `X-ShipGuard-Client` at your proxy) when the limit matters.
 - **Single-replica state.** Rate limits are in-memory; use a shared store for multiple replicas. The canary secret is
   random per process unless `SHIPGUARD_CANARY_SECRET` is set.
 - **Text only.** Image / audio content parts are passed through unscanned.
