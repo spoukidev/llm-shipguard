@@ -61,3 +61,17 @@ def test_rate_limiter_token_bucket():
     now[0] = 1.0
     assert rl.check("/x", "a")[0]            # refilled
     assert rl.check("/slow", "a")[0] and not rl.check("/slow", "a")[0]   # per-route
+
+
+def test_rate_limiter_prunes_idle_buckets_but_keeps_throttled_ones():
+    now = [0.0]
+    rl = RateLimiter(RateLimitConfig(default=RateLimit(requests_per_minute=60, burst=1)), clock=lambda: now[0])
+    rl.max_buckets = 3
+    assert rl.check("/x", "hot")[0] and not rl.check("/x", "hot")[0]
+    for i in range(3):  # fills the table while "hot" is still empty
+        rl.check("/x", f"spray-{i}")
+    assert ("/x", "hot") in rl._buckets and not rl.check("/x", "hot")[0]
+    for i in range(50):  # one-off client ids spread over time
+        now[0] += 2.0
+        rl.check("/x", f"late-{i}")
+    assert len(rl._buckets) <= rl.max_buckets

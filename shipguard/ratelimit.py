@@ -20,6 +20,11 @@ class _Bucket:
 
 
 class RateLimiter:
+    #: Above this many buckets, idle (fully refilled) ones are dropped. A full
+    #: bucket is indistinguishable from a brand-new one, so pruning it never
+    #: changes a decision; it only stops memory growing with every client id.
+    max_buckets = 10_000
+
     def __init__(self, cfg: RateLimitConfig, clock=time.monotonic) -> None:
         self.cfg = cfg
         self.clock = clock
@@ -39,6 +44,8 @@ class RateLimiter:
         with self._lock:
             b = self._buckets.get((route, client))
             if b is None:
+                if len(self._buckets) >= self.max_buckets:
+                    self._prune(now)
                 b = _Bucket(tokens=float(lim.burst), updated=now)
                 self._buckets[(route, client)] = b
             b.tokens = min(float(lim.burst), b.tokens + (now - b.updated) * rate)
@@ -48,6 +55,13 @@ class RateLimiter:
                 return True, 0.0
             retry = (1.0 - b.tokens) / rate if rate > 0 else 60.0
             return False, retry
+
+    def _prune(self, now: float) -> None:
+        """Drop buckets that have refilled to their burst size (caller holds the lock)."""
+        for key, b in list(self._buckets.items()):
+            lim = self.limit_for(key[0])
+            if b.tokens + (now - b.updated) * lim.requests_per_minute / 60.0 >= lim.burst:
+                del self._buckets[key]
 
     def reset(self) -> None:
         with self._lock:
